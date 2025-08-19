@@ -74,6 +74,65 @@ function App() {
 
 export default App;
 
+// import React, { useState } from "react";
+// import DeviceInput from "./components/DeviceInput";
+// import Player from "./components/Player";
+// import api from "./lib/api";
+
+// function App() {
+//   const [deviceJson, setDeviceJson] = useState(null);
+//   const [deviceId, setDeviceId] = useState(null);
+
+//   const loadFromUUID = async (uuid) => {
+//     setDeviceJson(null);
+//     setDeviceId(null);
+
+//     // ✅ Basic UUID validation
+//     if (!uuid || !/^[0-9a-fA-F-]{8,}$/i.test(uuid)) {
+//       alert("Enter a valid UUID-like id");
+//       return;
+//     }
+
+//     try {
+//       // ✅ Only path is required, api.js already has baseURL
+//       const res = await api.get(`/${uuid}/`);
+
+//       if (!res.data || typeof res.data !== "object") {
+//         throw new Error("Invalid JSON response");
+//       }
+
+//       setDeviceJson(res.data);
+//       setDeviceId(uuid);
+//     } catch (err) {
+//       console.error(err);
+//       alert(
+//         "Failed to fetch device JSON: " +
+//           (err.response?.statusText || err.message)
+//       );
+//     }
+//   };
+
+//   return (
+//     <div className="app-root">
+//       {!deviceJson ? (
+//         <DeviceInput onSubmit={loadFromUUID} />
+//       ) : (
+//         <Player
+//           data={deviceJson}
+//           deviceId={deviceId}
+//           onExit={() => {
+//             setDeviceJson(null);
+//             setDeviceId(null);
+//           }}
+//         />
+//       )}
+//     </div>
+//   );
+// }
+
+// export default App;
+
+
 
 // import React, { useState } from 'react';
 // import axios from 'axios';
