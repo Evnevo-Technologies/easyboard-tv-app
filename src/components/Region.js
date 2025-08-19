@@ -202,6 +202,13 @@ function Region({ region, settings }) {
   const videoRef = useRef(null);
   const timerRef = useRef(null);
   const pausedRef = useRef(false);
+  const attemptedUnmuteRef = useRef(false);
+
+  const isSamsungTV = (() => {
+    if (typeof navigator === "undefined" || !navigator.userAgent) return false;
+    const ua = navigator.userAgent;
+    return /Tizen|SMART-TV|Maple|SamsungBrowser/i.test(ua);
+  })();
 
   // --- Helpers ---
   const clearTimer = useCallback(() => {
@@ -296,6 +303,33 @@ function Region({ region, settings }) {
     nextIndex();
   }, [nextIndex]);
 
+  const handleVideoError = useCallback(() => {
+    // Skip to next on error after brief delay to avoid tight loop
+    clearTimer();
+    timerRef.current = setTimeout(nextIndex, 500);
+  }, [clearTimer, nextIndex]);
+
+  const handleVideoLoaded = useCallback(() => {
+    const cur = playlist[index];
+    const videoEl = videoRef.current;
+    if (!videoEl) return;
+    if (cur && cur.type === "video") {
+      const allowSound = (region.sound || "").toLowerCase() === "unmute";
+      if (allowSound && !attemptedUnmuteRef.current) {
+        attemptedUnmuteRef.current = true;
+        setTimeout(() => {
+          try {
+            videoEl.muted = false;
+            const p = videoEl.play();
+            if (p && typeof p.then === "function") p.catch(() => {});
+          } catch (_) {
+            // ignore
+          }
+        }, 100);
+      }
+    }
+  }, [playlist, index, region]);
+
   // --- Lifecycle ---
   useEffect(() => {
     window.addEventListener("tv-control", handleTVControl);
@@ -336,8 +370,8 @@ function Region({ region, settings }) {
 
   const item = playlist[index];
   const objectFit = settings.stretching ? "fill" : "contain";
-  const allowSound = (region.sound || "").toLowerCase() === "unmute";
-  const showBlurBg = !settings.stretching; // blur only when not stretched (i.e., content may not fill)
+  // Disable heavy blur on Samsung TVs
+  const showBlurBg = !settings.stretching && !isSamsungTV;
 
   const blurBgStyle = {
     position: "absolute",
@@ -381,26 +415,20 @@ function Region({ region, settings }) {
   } else if (item.type === "video") {
     return (
       <div style={regionStyle} className="region">
-        {showBlurBg && (
-          <video
-            src={item.url}
-            autoPlay
-            loop
-            muted
-            playsInline
-            aria-hidden
-            style={blurBgStyle}
-          />
-        )}
+        {/* Avoid background video layer to reduce decoder load on TVs */}
         <video
           ref={videoRef}
           key={item.url + index}
           src={item.url}
           autoPlay
           playsInline
-          muted={!allowSound}
+          // Always start muted to satisfy autoplay, unmute in onLoadedData if allowed
+          muted
           controls={false}
           onEnded={handleVideoEnded}
+          onLoadedData={handleVideoLoaded}
+          onError={handleVideoError}
+          preload="auto"
           style={fgStyle}
         />
       </div>

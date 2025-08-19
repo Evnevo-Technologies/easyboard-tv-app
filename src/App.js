@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import DeviceInput from './components/DeviceInput';
 import Player from './components/Player';
+import { warmUpFirstAssets } from './lib/preload';
 
 function App() {
   const [deviceJson, setDeviceJson] = useState(null);
@@ -47,6 +48,8 @@ function App() {
         // only set state if it looks like a valid object
         setDeviceJson(json);
         setDeviceId(uuid);
+        // Warm up first assets in background to reduce time-to-first-frame
+        warmUpFirstAssets(json);
       })
       .catch((err) => {
         console.error(err);
