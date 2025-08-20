@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import Region from "./Region";
 import Ticker from "./Ticker";
+import useTVKeys from "../hooks/useTVKeys";
 
 function Player({ data, deviceId, onExit }) {
   const settings = (data && data.settings) || {};
@@ -28,34 +29,48 @@ function Player({ data, deviceId, onExit }) {
     if (onExit) onExit();
   }, [onExit]);
 
-  // ✅ Now handleKeyDown only depends on stable functions
-  const handleKeyDown = useCallback(
-    (e) => {
-      switch (e.key) {
-        case "ArrowRight":
-          onNext();
-          break;
-        case "ArrowLeft":
-          onPrev();
-          break;
-        case "Enter":
-          onToggle();
-          break;
-        case "Backspace":
-        case "Escape":
-          onBack();
-          break;
-        default:
-          break;
-      }
-    },
-    [onNext, onPrev, onToggle, onBack]
-  );
+  // ✅ Robust input handling for TVs and desktop
+  const lastHandledRef = useRef(0);
+  const debounceOnce = useCallback((fn) => {
+    const now = Date.now();
+    if (now - lastHandledRef.current < 100) return; // prevent double fire between listeners
+    lastHandledRef.current = now;
+    fn();
+  }, []);
+
+  // Desktop keyboard fallback (e.key)
+  const handleKeyDown = useCallback((e) => {
+    switch (e.key) {
+      case "ArrowRight":
+        debounceOnce(onNext);
+        break;
+      case "ArrowLeft":
+        debounceOnce(onPrev);
+        break;
+      case "Enter":
+        debounceOnce(onToggle);
+        break;
+      case "Backspace":
+      case "Escape":
+        debounceOnce(onBack);
+        break;
+      default:
+        break;
+    }
+  }, [debounceOnce, onNext, onPrev, onToggle, onBack]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
+
+  // TV remote support (keyCode mapping, Tizen return key, etc.)
+  useTVKeys({
+    onNext: () => debounceOnce(onNext),
+    onPrev: () => debounceOnce(onPrev),
+    onToggle: () => debounceOnce(onToggle),
+    onBack: () => debounceOnce(onBack),
+  });
 
   const gridStyle = {
     display: "grid",
@@ -67,12 +82,12 @@ function Player({ data, deviceId, onExit }) {
 
   return (
     <div className="player-root">
-      <div className="player-top">
+      {/* <div className="player-top">
         <div>{settings.device_name || `Device ${deviceId}`}</div>
         <div className="small">
           Press LEFT / RIGHT to change slides, ENTER to play/pause, RETURN to exit
         </div>
-      </div>
+      </div> */}
 
       <div className="player-grid" style={gridStyle}>
         {regions.map((r, idx) => (
@@ -90,129 +105,3 @@ export default Player;
 
 
 
-// import React from 'react';
-// import Region from './Region';
-// import Ticker from './Ticker';
-// // Note: useTVKeys is a custom hook, so you need to convert its logic or call its equivalent inside lifecycle
-
-// class Player extends React.Component {
-//   constructor(props) {
-//     super(props);
-
-//     const { data } = props;
-//     const settings = (data && data.settings) || {};
-//     const channel = (data && data.channel) || {};
-
-//     this.state = {
-//       globalPaused: false,
-//       settings: settings,
-//       channel: channel,
-//       gridX: channel.gridX || 12,
-//       gridY: channel.gridY || 12,
-//       regions: channel.regions || [],
-//       tickers: channel.tickers || [],
-//     };
-
-//     this.handleGlobalPause = this.handleGlobalPause.bind(this);
-//     this.handleGlobalResume = this.handleGlobalResume.bind(this);
-//     this.onNext = this.onNext.bind(this);
-//     this.onPrev = this.onPrev.bind(this);
-//     this.onToggle = this.onToggle.bind(this);
-//     this.onBack = this.onBack.bind(this);
-//   }
-
-//   componentDidMount() {
-//     window.addEventListener('global-pause', this.handleGlobalPause);
-//     window.addEventListener('global-resume', this.handleGlobalResume);
-
-//     // Simulate useTVKeys behavior with keyboard event listeners
-//     window.addEventListener('keydown', this.handleKeyDown);
-//   }
-
-//   componentWillUnmount() {
-//     window.removeEventListener('global-pause', this.handleGlobalPause);
-//     window.removeEventListener('global-resume', this.handleGlobalResume);
-//     window.removeEventListener('keydown', this.handleKeyDown);
-//   }
-
-//   handleGlobalPause() {
-//     this.setState({ globalPaused: true });
-//   }
-
-//   handleGlobalResume() {
-//     this.setState({ globalPaused: false });
-//   }
-
-//   handleKeyDown = (e) => {
-//     // Map keys for TV keys control
-//     switch (e.key) {
-//       case 'ArrowRight': // next
-//         this.onNext();
-//         break;
-//       case 'ArrowLeft': // prev
-//         this.onPrev();
-//         break;
-//       case 'Enter': // toggle play/pause
-//         this.onToggle();
-//         break;
-//       case 'Backspace': // back/exit
-//       case 'Escape':
-//         this.onBack();
-//         break;
-//       default:
-//         break;
-//     }
-//   };
-
-//   onNext() {
-//     window.dispatchEvent(new CustomEvent('tv-control', { detail: { action: 'next' } }));
-//   }
-
-//   onPrev() {
-//     window.dispatchEvent(new CustomEvent('tv-control', { detail: { action: 'prev' } }));
-//   }
-
-//   onToggle() {
-//     window.dispatchEvent(new CustomEvent('tv-control', { detail: { action: 'toggle-play' } }));
-//   }
-
-//   onBack() {
-//     if (this.props.onExit) {
-//       this.props.onExit();
-//     }
-//   }
-
-//   render() {
-//     const { settings, gridX, gridY, regions, tickers } = this.state;
-//     const { deviceId } = this.props;
-
-//     const gridStyle = {
-//       display: 'grid',
-//       gridTemplateColumns: `repeat(${gridX}, 1fr)`,
-//       gridTemplateRows: `repeat(${gridY}, 1fr)`,
-//       width: '100vw',
-//       height: '100vh',
-//     };
-
-//     return (
-//       <div className="player-root">
-//         <div className="player-top">
-//           <div>{settings.device_name || `Device ${deviceId}`}</div>
-//           <div className="small">
-//             Press LEFT / RIGHT to change slides, ENTER to play/pause, RETURN to exit
-//           </div>
-//         </div>
-
-//         <div className="player-grid" style={gridStyle}>
-//           {regions.map((r, idx) => (
-//             <Region key={idx} region={r} settings={settings} />
-//           ))}
-//         </div>
-
-//         {tickers && tickers.length > 0 && <Ticker items={tickers} />}
-//       </div>
-//     );
-//   }
-// }
-
-// export default Player;
