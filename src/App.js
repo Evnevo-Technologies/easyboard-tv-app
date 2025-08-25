@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Player from './components/Player';
 import { warmUpFirstAssets } from './lib/preload';
+import { primeOfflineCache, tizenIsAvailable } from './lib/tizenFS';
 
 function App() {
   const [deviceJson, setDeviceJson] = useState(null);
@@ -11,6 +12,22 @@ function App() {
   const API_URL = `https://devices.dev.easyboard.co.in/${FIXED_DEVICE_ID}/`;
 
   useEffect(() => {
+    // 1) Try cached JSON first (works offline)
+    try {
+      const cached = localStorage.getItem('deviceJson');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        setDeviceJson(parsed);
+        setDeviceId(localStorage.getItem('deviceId') || FIXED_DEVICE_ID);
+        // Warm up and prime cache when possible
+        warmUpFirstAssets(parsed);
+        if (tizenIsAvailable()) {
+          primeOfflineCache(parsed);
+        }
+      }
+    } catch (_) {}
+
+    // 2) Fetch fresh JSON in background
     fetch(API_URL, { cache: 'no-store' })
       .then(async (res) => {
         if (!res.ok) {
@@ -34,11 +51,22 @@ function App() {
       .then((json) => {
         setDeviceJson(json);
         setDeviceId(FIXED_DEVICE_ID);
+        try {
+          localStorage.setItem('deviceJson', JSON.stringify(json));
+          localStorage.setItem('deviceId', FIXED_DEVICE_ID);
+        } catch (_) {}
         warmUpFirstAssets(json); // Preload assets
+        // Prime offline cache on Tizen
+        if (tizenIsAvailable()) {
+          primeOfflineCache(json);
+        }
       })
       .catch((err) => {
         console.error(err);
-        alert('Failed to fetch device JSON: ' + err.message);
+        // If we already have cached data rendered, do not alert
+        if (!localStorage.getItem('deviceJson')) {
+          alert('Failed to fetch device JSON and no offline cache found. ' + err.message);
+        }
       });
   }, [API_URL]); // run when URL changes
 

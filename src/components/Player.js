@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import html2canvas from "html2canvas";
+import { getOrCacheOffline, tizenIsAvailable } from "../lib/tizenFS";
 import Ticker from "./Ticker";
 import useTVKeys from "../hooks/useTVKeys";
 import Region from "./Region";
@@ -22,16 +23,33 @@ function Player({ data, deviceId, onExit }) {
   );
   const allowMusicSound = String(settings && (settings.musicSound || settings.sound || "")).toLowerCase() === "unmute";
 
+  const [resolvedMusicUrl, setResolvedMusicUrl] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!backgroundMusicUrl) { setResolvedMusicUrl(null); return; }
+      if (tizenIsAvailable()) {
+        const local = await getOrCacheOffline(backgroundMusicUrl, { downloadIfMissing: true });
+        if (!cancelled) setResolvedMusicUrl(local || backgroundMusicUrl);
+      } else {
+        setResolvedMusicUrl(backgroundMusicUrl);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [backgroundMusicUrl]);
+
   const tryPlayMusic = useCallback(() => {
     const el = audioRef.current;
-    if (!el || !backgroundMusicUrl) return;
+    const srcUrl = resolvedMusicUrl || backgroundMusicUrl;
+    if (!el || !srcUrl) return;
     try {
-      el.src = backgroundMusicUrl;
+      el.src = srcUrl;
       el.muted = !allowMusicSound;
       const p = el.play();
       if (p && typeof p.then === "function") p.catch(() => {});
     } catch (_) {}
-  }, [backgroundMusicUrl, allowMusicSound]);
+  }, [backgroundMusicUrl, resolvedMusicUrl, allowMusicSound]);
 
   // Screenshot support (inline)
   const gridRef = useRef(null);
@@ -138,10 +156,10 @@ function Player({ data, deviceId, onExit }) {
         </div>
       </div> */}
 
-      {backgroundMusicUrl && (
+      {(resolvedMusicUrl || backgroundMusicUrl) && (
         <audio
           ref={audioRef}
-          src={backgroundMusicUrl}
+          src={resolvedMusicUrl || backgroundMusicUrl}
           autoPlay
           loop
           muted={!allowMusicSound}

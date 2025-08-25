@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import Hls from "hls.js";
+import { getOrCacheOffline, tizenIsAvailable } from "../lib/tizenFS";
 
 function Region({ region, settings, disableVideoBg = false }) {
   const playlistInit = (region.playlist || []).filter(Boolean);
@@ -228,6 +229,7 @@ function Region({ region, settings, disableVideoBg = false }) {
   };
 
   const item = playlist[index];
+  const [resolvedUrl, setResolvedUrl] = useState(null);
   const objectFit = settings.stretching ? "fill" : "contain";
   const rotationDeg = (item && (item.rotation || 0)) || (region && (region.rotation || 0)) || 0;
   const transitionMs = (item && (item.transitionDuration || 0)) || (region && (region.transitionDuration || 0)) || (settings && (settings.transitionDuration || 0)) || 400;
@@ -276,6 +278,24 @@ function Region({ region, settings, disableVideoBg = false }) {
     transition: `opacity ${transitionMs}ms ease-in-out, transform ${transitionMs}ms ease-in-out`,
   };
 
+  // Resolve offline URL when on Tizen
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!item || !item.url) {
+        setResolvedUrl(null);
+        return;
+      }
+      if (tizenIsAvailable()) {
+        const local = await getOrCacheOffline(item.url, { downloadIfMissing: true });
+        if (!cancelled) setResolvedUrl(local || item.url);
+      } else {
+        setResolvedUrl(item.url);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [item]);
+
   // Setup HLS streaming when needed
   useEffect(() => {
     const videoEl = videoRef.current;
@@ -287,7 +307,7 @@ function Region({ region, settings, disableVideoBg = false }) {
     }
     if (!item || !isHls) return;
 
-    const url = item.url;
+    const url = resolvedUrl || item.url;
     try {
       if (Hls.isSupported()) {
         const hls = new Hls({ autoStartLoad: true });
@@ -325,7 +345,7 @@ function Region({ region, settings, disableVideoBg = false }) {
         hlsRef.current = null;
       }
     };
-  }, [item, isHls, nextIndex, clearTimer]);
+  }, [item, isHls, nextIndex, clearTimer, resolvedUrl]);
 
   // If no items, render empty region after hooks
   if (!playlist.length || !item) {
@@ -345,7 +365,7 @@ function Region({ region, settings, disableVideoBg = false }) {
           />
         )}
         <img
-          src={item.url}
+          src={resolvedUrl || item.url}
           alt={item.caption || ""}
           style={fgStyle}
           onLoad={handleImageLoaded}
@@ -368,7 +388,7 @@ function Region({ region, settings, disableVideoBg = false }) {
           ) : (
             <video
               key={String(item.url) + "-vidbg-" + index}
-              src={isHls ? undefined : item.url}
+              src={isHls ? undefined : (resolvedUrl || item.url)}
               autoPlay
               loop
               muted
@@ -382,7 +402,7 @@ function Region({ region, settings, disableVideoBg = false }) {
         <video
           ref={videoRef}
           key={item.url + index}
-          src={isHls ? undefined : item.url}
+          src={isHls ? undefined : (resolvedUrl || item.url)}
           autoPlay
           playsInline
           // Always start muted to satisfy autoplay, unmute in onLoadedData if allowed
