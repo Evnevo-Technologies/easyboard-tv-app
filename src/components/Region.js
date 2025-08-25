@@ -120,6 +120,11 @@ function Region({ region, settings, disableVideoBg = false }) {
     const videoEl = videoRef.current;
     if (!videoEl) return;
     if (cur && cur.type === "video") {
+      // Attempt to start playback as soon as data is available
+      try {
+        const p0 = videoEl.play();
+        if (p0 && typeof p0.then === "function") p0.catch(() => {});
+      } catch (_) {}
       const allowSound = (region.sound || "").toLowerCase() === "unmute";
       if (allowSound && !attemptedUnmuteRef.current) {
         attemptedUnmuteRef.current = true;
@@ -150,6 +155,29 @@ function Region({ region, settings, disableVideoBg = false }) {
   }, [clearTimer, nextIndex]);
 
   // --- Lifecycle ---
+  // Final fallback: after item changes, try autoplay once after a short delay
+  useEffect(() => {
+    const cur = playlist[index];
+    if (!cur || cur.type !== "video") return;
+    const el = videoRef.current;
+    if (!el) return;
+    let tries = 0;
+    const tryPlay = () => {
+      tries += 1;
+      try {
+        el.muted = true;
+        const p = el.play();
+        if (p && typeof p.then === "function") p.catch(() => {
+          if (tries < 3) setTimeout(tryPlay, 150);
+        });
+      } catch (_) {
+        if (tries < 3) setTimeout(tryPlay, 150);
+      }
+    };
+    const t = setTimeout(tryPlay, 250);
+    return () => clearTimeout(t);
+  }, [playlist, index]);
+
   useEffect(() => {
     window.addEventListener("tv-control", handleTVControl);
     window.addEventListener("global-pause", onGlobalPause);
@@ -287,6 +315,8 @@ function Region({ region, settings, disableVideoBg = false }) {
           controls={false}
           onEnded={handleVideoEnded}
           onLoadedData={handleVideoLoaded}
+          onLoadedMetadata={handleVideoLoaded}
+          onCanPlay={handleVideoLoaded}
           onError={handleVideoError}
           preload="auto"
           poster={item.poster || undefined}
