@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import Hls from "hls.js";
 
 function Region({ region, settings, disableVideoBg = false }) {
   const playlistInit = (region.playlist || []).filter(Boolean);
@@ -9,6 +10,8 @@ function Region({ region, settings, disableVideoBg = false }) {
   const timerRef = useRef(null);
   const pausedRef = useRef(false);
   const attemptedUnmuteRef = useRef(false);
+  const hlsRef = useRef(null);
+  const [visible, setVisible] = useState(false);
 
   // --- Helpers ---
   const clearTimer = useCallback(() => {
@@ -47,9 +50,12 @@ function Region({ region, settings, disableVideoBg = false }) {
     } else if (cur.type === "video") {
       const dur = cur.duration || settings.videoDuration;
       if (dur) timerRef.current = setTimeout(nextIndex, dur);
-    } else if (cur.type === "web" || cur.type === "url") {
+    } else if (cur.type === "web" || cur.type === "url" || cur.type === "html") {
       const dur = cur.duration || settings.webDuration || settings.imageDuration || 8000;
       timerRef.current = setTimeout(nextIndex, dur);
+    } else if (cur.type === "hls") {
+      const dur = cur.duration || settings.videoDuration;
+      if (dur) timerRef.current = setTimeout(nextIndex, dur);
     }
   }, [playlist, index, settings, clearTimer, nextIndex]);
 
@@ -200,6 +206,13 @@ function Region({ region, settings, disableVideoBg = false }) {
     return clearTimer;
   }, [index, playlist, settings, resetTimer, clearTimer]);
 
+  // Simple fade/transition effect on item change
+  useEffect(() => {
+    setVisible(false);
+    const t = setTimeout(() => setVisible(true), 20);
+    return () => clearTimeout(t);
+  }, [index]);
+
   // --- Render ---
   const x = region.data_grid?.x || 0;
   const y = region.data_grid?.y || 0;
@@ -214,10 +227,11 @@ function Region({ region, settings, disableVideoBg = false }) {
     position: "relative", // needed for background blur layer
   };
 
-  if (!playlist.length) return <div style={regionStyle}></div>;
-
   const item = playlist[index];
   const objectFit = settings.stretching ? "fill" : "contain";
+  const rotationDeg = (item && (item.rotation || 0)) || (region && (region.rotation || 0)) || 0;
+  const transitionMs = (item && (item.transitionDuration || 0)) || (region && (region.transitionDuration || 0)) || (settings && (settings.transitionDuration || 0)) || 400;
+  const isHls = !!(item && (item.type === "hls" || (/\.m3u8(\?.*)?$/i).test(item.url || "")));
   // Show a blurred background layer when content may not fill the region
   const showBlurBg = !settings.stretching;
   const canUseCssFilter =
@@ -234,10 +248,12 @@ function Region({ region, settings, disableVideoBg = false }) {
     objectFit: "cover",
     filter: "blur(24px) brightness(0.8)",
     WebkitFilter: "blur(24px) brightness(0.8)",
-    transform: "scale(1.1)",
+    transform: `scale(1.1) rotate(${rotationDeg}deg)`,
     willChange: "filter, transform",
     pointerEvents: "none",
     zIndex: 0,
+    opacity: visible ? 1 : 0,
+    transition: `opacity ${transitionMs}ms ease-in-out, transform ${transitionMs}ms ease-in-out`,
   };
   const bgStyleNoFilter = {
     ...blurBgStyle,
@@ -255,7 +271,66 @@ function Region({ region, settings, disableVideoBg = false }) {
     objectFit,
     backgroundColor: "transparent",
     zIndex: 1,
+    transform: `rotate(${rotationDeg}deg)`,
+    opacity: visible ? 1 : 0,
+    transition: `opacity ${transitionMs}ms ease-in-out, transform ${transitionMs}ms ease-in-out`,
   };
+
+  // Setup HLS streaming when needed
+  useEffect(() => {
+    const videoEl = videoRef.current;
+    if (!videoEl) return;
+    // Clean up any previous instance
+    if (hlsRef.current) {
+      try { hlsRef.current.destroy(); } catch (_) {}
+      hlsRef.current = null;
+    }
+    if (!item || !isHls) return;
+
+    const url = item.url;
+    try {
+      if (Hls.isSupported()) {
+        const hls = new Hls({ autoStartLoad: true });
+        hlsRef.current = hls;
+        hls.loadSource(url);
+        hls.attachMedia(videoEl);
+        hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+          try {
+            videoEl.muted = true;
+            const p = videoEl.play();
+            if (p && typeof p.then === "function") p.catch(() => {});
+          } catch (_) {}
+        });
+        hls.on(Hls.Events.ERROR, () => {
+          // on error, skip to next after short delay
+          clearTimer();
+          timerRef.current = setTimeout(nextIndex, 500);
+        });
+      } else if (videoEl.canPlayType && videoEl.canPlayType("application/vnd.apple.mpegurl")) {
+        videoEl.src = url;
+        try {
+          videoEl.muted = true;
+          const p = videoEl.play();
+          if (p && typeof p.then === "function") p.catch(() => {});
+        } catch (_) {}
+      }
+    } catch (_) {
+      // Fallback: try native src
+      try { videoEl.src = url; } catch (_) {}
+    }
+
+    return () => {
+      if (hlsRef.current) {
+        try { hlsRef.current.destroy(); } catch (_) {}
+        hlsRef.current = null;
+      }
+    };
+  }, [item, isHls, nextIndex, clearTimer]);
+
+  // If no items, render empty region after hooks
+  if (!playlist.length || !item) {
+    return <div style={regionStyle}></div>;
+  }
 
   if (item.type === "image") {
     return (
@@ -278,7 +353,7 @@ function Region({ region, settings, disableVideoBg = false }) {
         />
       </div>
     );
-  } else if (item.type === "video") {
+  } else if (item.type === "video" || item.type === "hls") {
     return (
       <div style={regionStyle} className="region">
         {!disableVideoBg && (
@@ -293,7 +368,7 @@ function Region({ region, settings, disableVideoBg = false }) {
           ) : (
             <video
               key={String(item.url) + "-vidbg-" + index}
-              src={item.url}
+              src={isHls ? undefined : item.url}
               autoPlay
               loop
               muted
@@ -307,7 +382,7 @@ function Region({ region, settings, disableVideoBg = false }) {
         <video
           ref={videoRef}
           key={item.url + index}
-          src={item.url}
+          src={isHls ? undefined : item.url}
           autoPlay
           playsInline
           // Always start muted to satisfy autoplay, unmute in onLoadedData if allowed
@@ -331,6 +406,18 @@ function Region({ region, settings, disableVideoBg = false }) {
         <iframe
           src={item.url}
           title={item.caption || "web-item"}
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0, zIndex: 1 }}
+        />
+      </div>
+    );
+  } else if (item.type === "html") {
+    const doc = item.html || "";
+    return (
+      <div style={regionStyle} className="region">
+        <iframe
+          title={item.caption || "html-item"}
+          srcDoc={doc}
+          sandbox="allow-scripts allow-same-origin"
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0, zIndex: 1 }}
         />
       </div>

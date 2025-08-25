@@ -40,7 +40,7 @@ function App() {
         console.error(err);
         alert('Failed to fetch device JSON: ' + err.message);
       });
-  }, []); // run once when app loads
+  }, [API_URL]); // run when URL changes
 
   return (
     <div className="app-root">

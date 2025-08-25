@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import Region from "./Region";
+import html2canvas from "html2canvas";
 import Ticker from "./Ticker";
 import useTVKeys from "../hooks/useTVKeys";
+import Region from "./Region";
 
 function Player({ data, deviceId, onExit }) {
   const settings = (data && data.settings) || {};
@@ -12,18 +13,60 @@ function Player({ data, deviceId, onExit }) {
   const [regions] = useState(channel.regions || []);
   const [tickers] = useState(channel.tickers || []);
 
+  // Background music
+  const audioRef = useRef(null);
+  const backgroundMusicUrl = (
+    (settings && (settings.backgroundMusicUrl || (settings.backgroundMusic && settings.backgroundMusic.url))) ||
+    (channel && (channel.backgroundMusicUrl || (channel.backgroundMusic && channel.backgroundMusic.url))) ||
+    null
+  );
+  const allowMusicSound = String(settings && (settings.musicSound || settings.sound || "")).toLowerCase() === "unmute";
+
+  const tryPlayMusic = useCallback(() => {
+    const el = audioRef.current;
+    if (!el || !backgroundMusicUrl) return;
+    try {
+      el.src = backgroundMusicUrl;
+      el.muted = !allowMusicSound;
+      const p = el.play();
+      if (p && typeof p.then === "function") p.catch(() => {});
+    } catch (_) {}
+  }, [backgroundMusicUrl, allowMusicSound]);
+
+  // Screenshot support (inline)
+  const gridRef = useRef(null);
+  const captureGridScreenshot = useCallback(async () => {
+    try {
+      if (!gridRef.current) return null;
+      const canvas = await html2canvas(gridRef.current, {
+        useCORS: true,
+        backgroundColor: "#000",
+        logging: false,
+        scale: (typeof window !== "undefined" && window.devicePixelRatio) ? window.devicePixelRatio : 1,
+      });
+      const dataUrl = canvas.toDataURL("image/png");
+      window.lastScreenshot = dataUrl;
+      return dataUrl;
+    } catch (_) {
+      return null;
+    }
+  }, []);
+
   // ✅ Wrap handlers in useCallback so they’re stable
   const onNext = useCallback(() => {
     window.dispatchEvent(new CustomEvent("tv-control", { detail: { action: "next" } }));
-  }, []);
+    tryPlayMusic();
+  }, [tryPlayMusic]);
 
   const onPrev = useCallback(() => {
     window.dispatchEvent(new CustomEvent("tv-control", { detail: { action: "prev" } }));
-  }, []);
+    tryPlayMusic();
+  }, [tryPlayMusic]);
 
   const onToggle = useCallback(() => {
     window.dispatchEvent(new CustomEvent("tv-control", { detail: { action: "toggle-play" } }));
-  }, []);
+    tryPlayMusic();
+  }, [tryPlayMusic]);
 
   const onBack = useCallback(() => {
     if (onExit) onExit();
@@ -50,6 +93,12 @@ function Player({ data, deviceId, onExit }) {
       case "Enter":
         debounceOnce(onToggle);
         break;
+      case "s":
+      case "S":
+        debounceOnce(() => {
+          captureGridScreenshot();
+        });
+        break;
       case "Backspace":
       case "Escape":
         debounceOnce(onBack);
@@ -57,7 +106,7 @@ function Player({ data, deviceId, onExit }) {
       default:
         break;
     }
-  }, [debounceOnce, onNext, onPrev, onToggle, onBack]);
+  }, [debounceOnce, onNext, onPrev, onToggle, onBack, captureGridScreenshot]);
 
   useEffect(() => {
     window.addEventListener("keydown", handleKeyDown);
@@ -89,7 +138,18 @@ function Player({ data, deviceId, onExit }) {
         </div>
       </div> */}
 
-      <div className="player-grid" style={gridStyle}>
+      {backgroundMusicUrl && (
+        <audio
+          ref={audioRef}
+          src={backgroundMusicUrl}
+          autoPlay
+          loop
+          muted={!allowMusicSound}
+          style={{ display: "none" }}
+        />
+      )}
+
+      <div className="player-grid" style={gridStyle} ref={gridRef}>
         {regions.map((r, idx) => (
           <Region key={idx} region={r} settings={settings} />
         ))}
