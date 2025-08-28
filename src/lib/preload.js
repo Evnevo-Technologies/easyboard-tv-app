@@ -2,13 +2,6 @@
 
 function log(...args) {
   try { console.log('[preload]', ...args); } catch (_) {}
-  try {
-    const msg = args.map((a) => {
-      if (typeof a === 'string') return a;
-      try { return JSON.stringify(a); } catch (_) { return String(a); }
-    }).join(' ');
-    // alert(`[preload] ${msg}`);
-  } catch (_) {}
 }
 
 export function preloadImage(url) {
